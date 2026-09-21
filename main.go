@@ -47,13 +47,56 @@ func monCpu(cpuChan chan <-string){
 	}
 }
 
+func getRamusage() float64{
+	file,err:=os.Open("/proc/meminfo")
+	if err!=nil{
+		return 0
+	}
+	var total,available uint64
+	defer file.Close()
+
+	scanner:=bufio.NewScanner(file)
+
+	for scanner.Scan(){
+		line:=scanner.Text()
+		if strings.HasPrefix(line,"MemTotal:"){
+			fields:=strings.Fields(line)
+			total,_=strconv.ParseUint(fields[1],10,64)
+		}
+		if strings.HasPrefix(line,"MemAvailable:"){
+			fields:=strings.Fields(line)
+			available,_=strconv.ParseUint(fields[1],10,64)
+		}
+
+	}
+
+	if total == 0{
+		return 0
+	}
+	return float64(total -available)/float64(total)*100
+
+}
+
+func monRam(ramchan chan<-string){
+	for{
+		usageram:=getRamusage()
+		msg:=fmt.Sprintf("Ram usage is %.2f%%", usageram)
+		ramchan<-msg
+		time.Sleep(time.Second *5)
+	}
+}
+
 func main(){
 	cpuChan:=make(chan string)
+	ramchan:=make(chan string)
 	go monCpu(cpuChan)
-
+	go monRam(ramchan)
 	for{
 		select{
 		case msg:=<-cpuChan:
+			curent_time:=time.Now().Format("15.03.2006 15:01:05")
+			fmt.Printf("[%s] %s \n", curent_time,msg)
+		case msg:=<-ramchan:
 			curent_time:=time.Now().Format("15.03.2006 15:01:05")
 			fmt.Printf("[%s] %s \n", curent_time,msg)
 		}
