@@ -38,10 +38,24 @@ func getCPUload() float64{
 	return float64(total - idle)/float64(total)*100
 }
 
+func monCpu(cpuChan chan <-string){
+	for{
+		load:= getCPUload()
+		msg:= fmt.Sprintf(" CPU load is %.2f%% ",load)
+		cpuChan<-msg
+		time.Sleep(time.Second*5)
+	}
+}
 
 func main(){
-	curent_time:=time.Now()
-	cpu_load:=getCPUload()
-	fmt.Printf("Time is - %s", curent_time.Format("15.03.2006 15:01:05"))
-	fmt.Printf("\n CPU load is %.2f%% \n",cpu_load)
+	cpuChan:=make(chan string)
+	go monCpu(cpuChan)
+
+	for{
+		select{
+		case msg:=<-cpuChan:
+			curent_time:=time.Now().Format("15.03.2006 15:01:05")
+			fmt.Printf("[%s] %s \n", curent_time,msg)
+		}
+	}
 }
