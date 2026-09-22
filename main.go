@@ -3,39 +3,17 @@ package main
 import(
 	"fmt"
 	"time"
-	"os"
-	"strconv"
-	"strings"
-	"bufio"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
+	"net/http"
 )
 
 func getCPUload() float64{
-	file,err:=os.Open("/proc/stat")
+	percent,err:=cpu.Percent(time.Second,false )
 	if err!=nil{
 		return 0
 	}
-	defer file.Close()
-
-	scanner:= bufio.NewScanner(file)
-	scanner.Scan()
-	line:=scanner.Text()
-	fields:= strings.Fields(line)
-	if len(fields)<5{
-		return 0
-	}
-
-	var total,idle uint64
-	for i:=1 ;i<len(fields);i++{
-		val,_:= strconv.ParseUint(fields[i],10,64)
-		total+=val
-		if i==4{
-			idle=val
-		}
-	}
-	if total == 0{
-		return 0
-	}
-	return float64(total - idle)/float64(total)*100
+	return percent[0]
 }
 
 func monCpu(cpuChan chan <-string){
@@ -48,33 +26,11 @@ func monCpu(cpuChan chan <-string){
 }
 
 func getRamusage() float64{
-	file,err:=os.Open("/proc/meminfo")
-	if err!=nil{
+    ram,err:=mem.VirtualMemory()
+	if err != nil{
 		return 0
 	}
-	var total,available uint64
-	defer file.Close()
-
-	scanner:=bufio.NewScanner(file)
-
-	for scanner.Scan(){
-		line:=scanner.Text()
-		if strings.HasPrefix(line,"MemTotal:"){
-			fields:=strings.Fields(line)
-			total,_=strconv.ParseUint(fields[1],10,64)
-		}
-		if strings.HasPrefix(line,"MemAvailable:"){
-			fields:=strings.Fields(line)
-			available,_=strconv.ParseUint(fields[1],10,64)
-		}
-
-	}
-
-	if total == 0{
-		return 0
-	}
-	return float64(total -available)/float64(total)*100
-
+	return ram.UsedPercent
 }
 
 func monRam(ramchan chan<-string){
@@ -86,11 +42,34 @@ func monRam(ramchan chan<-string){
 	}
 }
 
+func metricsHandler(w http.ResponseWriter, r *http.Request){
+	cpu:=getCPUload()
+	ram:=getRamusage()
+	fmt.Fprintf(w, "# HELP os_monitor_cpu_load Current CPU load percentage\n")
+    fmt.Fprintf(w, "# TYPE os_monitor_cpu_load gauge\n")
+    fmt.Fprintf(w, "os_monitor_cpu_load %.2f\n", cpu)
+
+    fmt.Fprintf(w, "# HELP os_monitor_ram_usage Current RAM usage percentage\n")
+    fmt.Fprintf(w, "# TYPE os_monitor_ram_usage gauge\n")
+    fmt.Fprintf(w, "os_monitor_ram_usage %.2f\n", ram)
+}
+
+
 func main(){
 	cpuChan:=make(chan string)
 	ramchan:=make(chan string)
 	go monCpu(cpuChan)
 	go monRam(ramchan)
+
+	http.HandleFunc("/metrics", metricsHandler)
+	go func(){
+		if err:=http.ListenAndServe(":8080",nil);err!=nil{
+			fmt.Printf("Error starting server: %s\n", err)
+		}
+
+	}()
+
+
 	for{
 		select{
 		case msg:=<-cpuChan:
